@@ -77,7 +77,7 @@ The MPID identification mechanism (INT 10h AX=4F17h, BX='MP') allows runtime det
 
 ## License
 
-MIT License â€” Copyright (c) 2026 Marco Pistella
+MIT License - Copyright (c) 2026 Marco Pistella
 
 See [LICENSE](LICENSE) for full text.
 
