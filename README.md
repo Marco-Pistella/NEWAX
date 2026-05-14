@@ -75,6 +75,14 @@ Requires `CONST.INC` and `STRUCT.INC` in the same directory.
 
 The MPID identification mechanism (INT 10h AX=4F17h, BX='MP') allows runtime detection of a loaded NEWAX instance and safe inter-instance communication for the toggle commands.
 
+## Acknowledgements
+
+Special thanks to **Falcosoft** for first documenting the Nvidia VESA VBIOS bug
+in his [Vogons thread](https://www.vogons.org/viewtopic.php?t=57420), for his
+extensive real hardware testing, and for his insightful technical feedback which
+directly influenced several design decisions in NEWAX. Thanks also to all the
+beta testers on the [Vogons](https://www.vogons.org) retro-computing forum.
+
 ## License
 
 MIT License - Copyright (c) 2026 Marco Pistella
