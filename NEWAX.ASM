@@ -18,9 +18,9 @@ new_int_10:
 	or	bl,bl
 	jne	no_fix_4f05_vram
 	push	dx
-	cmp	cs: byte ptr [shift_mode_size],3h
+	cmp	cs: byte ptr [shift_mode_size],NEWAX_PLANAR_MODE
 	jne	no_planar_align_5
-	shl	dx,2h
+	shl	dx,VGA_PLANER_PLANE_SHIFT
 no_planar_align_5:
 	cmp	dx,cs: word ptr [vesa_memory]
 	pop	dx
@@ -38,11 +38,11 @@ test_vga_open_video_mode:
 	push	BIOS_INTERRUPT_SEGMENT
 	pop	ds
 	cmp	ds: byte ptr [BIOS_OFFSET_VGA_VIDEO_MODE],VGA_MAX_VIDEO_MODE
-	pop	ds
 	ja	vesa_mode_on
 	and	cs: byte ptr [status_flag_0_tsr],NOT NEWAX_FLAG_VESA_MODE_TSR
 vesa_mode_on:
 	call	Reset_Nvidia_Start_Address
+	pop	ds
 	popa
 	iret
 continue_int_10_0:
@@ -83,31 +83,31 @@ continue_int_10_2:
 	mov	di,OFFSET vesa_buffer_func_1
 	int	VIDEO_INTERRUPT
 	cmp	ax,VESA_ID
-	jne	fail_vesa_info
-	mov	al,es: byte ptr [di].ModeInfoBlock.WinAAttributes
+	jne	end_open_vesa
+	mov	al,ds: byte ptr [di].ModeInfoBlock.WinAAttributes
 	and	al,VESA_WINDOW_READIBLE OR VESA_WINDOW_WRITEABLE
 	cmp	al,VESA_WINDOW_READIBLE OR VESA_WINDOW_WRITEABLE
-	jne	fail_vesa_info
-	cmp	es: word ptr [di].ModeInfoBlock.WinSize,VESA_WINDOWS_DEFAULT_SIZE
-	jne	fail_vesa_info
-	cmp	es: word ptr [di].ModeInfoBlock.WinGranularity,VESA_WINDOWS_DEFAULT_GRANULARITY
-	jne	fail_vesa_info
-	mov	ax,es: word ptr [di].ModeInfoBlock.BytesPerScanLine
+	jne	end_open_vesa
+	cmp	ds: word ptr [di].ModeInfoBlock.WinSize,VESA_WINDOWS_DEFAULT_SIZE
+	jne	end_open_vesa
+	cmp	ds: word ptr [di].ModeInfoBlock.WinGranularity,VESA_WINDOWS_DEFAULT_GRANULARITY
+	jne	end_open_vesa
+	mov	ax,ds: word ptr [di].ModeInfoBlock.BytesPerScanLine
 	mov	ds: word ptr [byte_per_scanline],ax
-	mov	ax,es: word ptr [di].ModeInfoBlock.XResolution
+	mov	ax,ds: word ptr [di].ModeInfoBlock.XResolution
 	mov	ds: word ptr [x_res],ax
-	mov	ax,es: word ptr [di].ModeInfoBlock.YResolution
+	mov	ax,ds: word ptr [di].ModeInfoBlock.YResolution
 	mov	ds: word ptr [y_res],ax
-	mov	ax,3h
-	cmp	es: byte ptr [di].ModeInfoBlock.MemoryModel,VESA_PLANAR
+	mov	ax,NEWAX_PLANAR_MODE
+	cmp	ds: byte ptr [di].ModeInfoBlock.MemoryModel,VESA_PLANAR
 	je	ok_vesa_mode
 	dec	ax
-	cmp	es: byte ptr [di].ModeInfoBlock.MemoryModel,VESA_PACKED
+	cmp	ds: byte ptr [di].ModeInfoBlock.MemoryModel,VESA_PACKED
 	je	ok_vesa_mode
-	cmp	es: byte ptr [di].ModeInfoBlock.MemoryModel,VESA_DIRECT_COLOR
-	jne	fail_vesa_info
-	mov	ah,1h
-	cmp	es: byte ptr [di].ModeInfoBlock.BitsPerPixel,VESA_32BPP
+	cmp	ds: byte ptr [di].ModeInfoBlock.MemoryModel,VESA_DIRECT_COLOR
+	jne	end_open_vesa
+	inc	ah
+	cmp	ds: byte ptr [di].ModeInfoBlock.BitsPerPixel,VESA_32BPP
 	jne	ok_vesa_mode	
 	inc	ah
 ok_vesa_mode:
@@ -115,7 +115,48 @@ ok_vesa_mode:
 	or	ds: byte ptr [status_flag_0_tsr],NEWAX_FLAG_VESA_MODE_TSR
 	mov	ds: word ptr [start_x],VESA_INIT_START_ADDRESS_X
 	mov	ds: word ptr [start_y],VESA_INIT_START_ADDRESS_Y
-fail_vesa_info:
+	test	ds: byte ptr [vesa_mode + SIZEOF BYTE],VESA_OPEN_CLEAR_FLAG
+	jne	end_open_vesa
+	test	ds: byte ptr [vesa_mode + SIZEOF BYTE],VESA_OPEN_LINEAR_FLAG
+	je	no_linear_mode_1
+	mov	ax,(VESA_ID SHL 8h) + VESA_FUNC_OPEN_VIDEO_MODE
+	mov	bx,ds: word ptr [vesa_mode]
+	and	bh,NOT VESA_OPEN_LINEAR_FLAG
+	pushf
+	call 	cs: dword ptr [old_int_10_off]
+no_linear_mode_1:
+	mov	si,ds: word ptr [vesa_memory]
+	cmp	ds: byte ptr [di].ModeInfoBlock.MemoryModel,VESA_PLANAR
+	jne	clear_vram
+	shr	si,VGA_PLANER_PLANE_SHIFT
+clear_vram:
+	push	eax
+	xor	bp,bp
+	mov	es,ds: word ptr [di].ModeInfoBlock.WinASegment
+	xor	di,di
+loop_clear_vram:
+	mov	ax,(VESA_ID SHL 8h) + VESA_FUNC_SET_BANK
+	xor	bx,bx
+	mov	dx,bp
+	int	VIDEO_INTERRUPT
+	xor	eax,eax
+	mov	cx,HW_SEGMENT_SIZE / SIZEOF DWORD
+	rep	stosd
+	inc	bp
+	cmp	bp,si
+	jb	loop_clear_vram
+	mov	ax,(VESA_ID SHL 8h) + VESA_FUNC_SET_BANK
+	xor	bx,bx
+	xor	dx,dx
+	int	VIDEO_INTERRUPT
+	pop	eax
+	test	ds: byte ptr [vesa_mode + SIZEOF BYTE],VESA_OPEN_LINEAR_FLAG
+	je	end_open_vesa
+	mov	ax,(VESA_ID SHL 8h) + VESA_FUNC_OPEN_VIDEO_MODE
+	mov	bx,ds: word ptr [vesa_mode]
+	pushf
+	call 	cs: dword ptr [old_int_10_off]
+end_open_vesa:
 	call	Reset_Nvidia_Start_Address
 	pop	es
 	pop	ds
@@ -313,9 +354,12 @@ test_set_address:
 	cmp	bl,VESA_SET_START_ADDRESS
 	je	set_start_address
 	cmp	bl,VESA_SET_START_ADDRESS_RETRACE
-	je	vretrace_off
+	je	check_vretrace_status
 	popa
 	jmp	go_int_10
+check_vretrace_status:
+	test	cs: byte ptr [status_flag_0_tsr],NEWAX_VSYNC_OFF_FLAG_TSR
+	jne	set_start_address
 vretrace_off:
 	in	al,dx
 	test	al,VGA_RETRACE
@@ -729,6 +773,14 @@ test_next_arg_1:
 	jmp	dec_next_args
 test_next_arg_2:
 	and	ah,NEWAX_UPPER_CASE
+	cmp	ax,'V/'
+	jne	test_vbepmi_arg
+	test	ds: byte ptr [status_flag_1],NEWAX_VSYNC_OFF_FLAG
+	jne	exit_with_print
+	or	ds: byte ptr [status_flag_1],NEWAX_VSYNC_OFF_FLAG
+	jmp	dec_next_args
+test_vbepmi_arg:
+
 	cmp	ax,'P/'
 	jne	test_next_arg_3
 	test	ds: byte ptr [status_flag_0],NEWAX_VBEPMI_FLAG
@@ -838,6 +890,7 @@ no_start_address:
 continue_status_3:
 	call	Write_Nvidia_Detect
 	je	exit_newax
+	call	Detect_Supported_Nvidia
 	mov	si,OFFSET dos_message_26 + 10h
 	mov	ax,ds: word ptr [nvidia_device_id]
 	mov	cx,4h
@@ -904,6 +957,14 @@ no_flag_status:
 	add	al,al
 	cmp	al,NEWAX_LAST_FLAG
 	jne	next_status_flag
+	mov	dx,OFFSET dos_message_37
+	test	es: byte ptr [status_flag_0_tsr],NEWAX_VSYNC_OFF_FLAG_TSR
+	jne	vsync_forced_to_off_1
+	mov	dx,OFFSET dos_message_38
+vsync_forced_to_off_1:
+	mov	ah,DOS_FUNC_DISPLAY_STRING
+	int	DOS_INTERRUPT
+test_status_vesa_memory:
 	test	es: byte ptr [status_flag_0_tsr],NEWAX_FORCE_VESA_MEMORY_TSR
 	je	exit_newax
 	mov	si,OFFSET dos_message_34 + 1Ch
@@ -950,6 +1011,8 @@ go_install:
 	jne	force_newax_install
 	call	Found_NVIDIA_Card
 	jc	exit_with_print
+	call	Detect_Supported_Nvidia
+	jc	exit_newax
 	call	Write_Nvidia_Detect
 	je	exit_newax
 	mov	ds: word ptr [dos_message_pointer],OFFSET dos_message_04
@@ -1036,9 +1099,92 @@ no_set_flag:
 	add	al,al
 	cmp	al,NEWAX_LAST_FLAG
 	jne	next_set_flag
+	test	ds: byte ptr [status_flag_1],NEWAX_VSYNC_OFF_FLAG
+	je	no_force_vsync
+	xor	es: byte ptr [status_flag_0_tsr],NEWAX_VSYNC_OFF_FLAG_TSR
+	mov	dx,OFFSET dos_message_37
+	test	es: byte ptr [status_flag_0_tsr],NEWAX_VSYNC_OFF_FLAG_TSR
+	jne	vsync_forced_to_off
+	mov	dx,OFFSET dos_message_38
+vsync_forced_to_off:
+	mov	ah,DOS_FUNC_DISPLAY_STRING
+	int	DOS_INTERRUPT
+no_force_vsync:
 	ret
 
 	Write_NEWAX_Status_Flag	endp
+
+;#INPUT#######################################################################
+;
+;	NONE
+;
+;#OUTPUT######################################################################
+;
+;	C(0) = Supported
+;	Z(1) = Not supported
+;
+;#COMMENT#####################################################################
+;
+;	Detect Nvidia supported card
+;
+;#############################################################################
+
+	Detect_Supported_Nvidia	proc	near
+
+
+	call	Get_CRTC_Port
+	mov	al,NVIDIA_CRTC_UNLOCK_REG
+	out	dx,al
+	inc	dx
+	in	al,dx
+	xchg	ax,bx
+	dec	dx
+	mov	al,NVIDIA_CRTC_UNLOCK_REG
+	out	dx,al
+	mov	al,NVIDIA_CRTC_LOCK_VALUE
+	inc	dx
+	out	dx,al
+	dec	dx
+	mov	al,NVIDIA_EXTENDED_OFFSET
+	out	dx,al
+	inc	dx
+	in	al,dx
+	mov	ah,al
+	dec	dx
+	mov	al,NVIDIA_EXTENDED_OFFSET
+	out	dx,al
+	inc	dx
+	mov	al,ah
+	xor	al,0FFh
+	out	dx,al
+	dec	dx
+	mov	al,NVIDIA_EXTENDED_OFFSET
+	out	dx,al
+	inc	dx
+	in	al,dx
+	cmp	al,ah
+	jne	no_nvidia_supported
+	clc
+	ret
+no_nvidia_supported:
+	mov	al,NVIDIA_EXTENDED_OFFSET
+	out	dx,al
+	inc	dx
+	mov	al,ah
+	out	dx,al
+	dec	dx
+	mov	al,NVIDIA_CRTC_UNLOCK_REG
+	out	dx,al
+	inc	dx
+	xchg	ax,bx
+	out	dx,al
+	mov	dx,OFFSET dos_message_39
+	mov	ah,DOS_FUNC_DISPLAY_STRING
+	int	DOS_INTERRUPT
+	stc
+	ret
+	
+        Detect_Supported_Nvidia	endp
 
 ;#INPUT#######################################################################
 ;
@@ -1056,7 +1202,7 @@ no_set_flag:
 ;#############################################################################
 
 	Write_Nvidia_Detect	proc	near
-
+	
 	mov	dx,OFFSET dos_message_22
 	mov	ah,DOS_FUNC_DISPLAY_STRING
 	int	DOS_INTERRUPT
@@ -1531,14 +1677,15 @@ dos_message_03:
 dos_message_04:
 	DB	'NEWAX already installed',0Dh,0Ah,'$'
 dos_message_05:
-	DB	'Use: NEWAX.COM [/2] [/P] [/1] [/F] [/M:mmmmmm] - Install TSR',0Dh,0Ah
+	DB	'Use: NEWAX.COM [/2] [/P] [/1] [/F] [/V] [/M:mmmmmm] - Install TSR',0Dh,0Ah
 	DB	'     NEWAX.COM /U  - Uninstall from memory',0Dh,0Ah
 	DB	'     NEWAX.COM /S  - View status',0Dh,0Ah
 	DB	'               [/2] = Toggle VESA 2.0/3.0',0Dh,0Ah
 	DB	'               [/P] = Toggle VBE/PMI',0Dh,0Ah
 	DB	'               [/1] = Toggle one page mode',0Dh,0Ah
-	DB	'               [/M:mmmmmm] = Set VESA memory to mmmmmm KiB',0Dh,0Ah
-	DB	'               [/F] = Force NEWAX installation',0Dh,0Ah,'$'
+	DB	'               [/V] = Toggle force VSync off',0Dh,0Ah
+	DB	'               [/F] = Force NEWAX installation',0Dh,0Ah
+	DB	'               [/M:mmmmmm] = Set VESA memory to mmmmmm KiB',0Dh,0Ah,'$'
 dos_message_06:
 	DB	'NEWAX not installed',0Dh,0Ah,'$'
 dos_message_07:
@@ -1564,9 +1711,9 @@ dos_message_16:
 dos_message_17:
 	DB	'PCI buses: XXX',0Dh,0Ah,'$'
 dos_message_18:
-	DB	'Original 4F06h VESA function: $'
+	DB	'Original Logical Scanline Length (4F06h): $'
 dos_message_19:
-	DB	'Original 4F07h VESA function: $'
+	DB	'Original Display Start Address/Panning (4F07h): $'
 dos_message_20:
 	DB	'Fail',0Dh,0Ah,'$'
 dos_message_21:
@@ -1599,6 +1746,12 @@ dos_message_35:
 	DB	'Invalid forced VESA memory (256-262144 KiB)',0Dh,0Ah,'$'
 dos_message_36:
 	DB	'NEWAX installed with /F switch',0Dh,0Ah,'$'
+dos_message_37:
+	DB	'Vsync status: Forced to off',0Dh,0Ah,'$'
+dos_message_38:
+	DB	'Vsync status: Default',0Dh,0Ah,'$'
+dos_message_39:
+	DB	'Incompatible Nvidia graphic card',0Dh,0Ah,'$'
 flag_dos_message:
 	DW	OFFSET dos_message_07,OFFSET dos_message_08
 	DW	OFFSET dos_message_09,OFFSET dos_message_10
