@@ -355,6 +355,53 @@ test_set_address:
 	je	set_start_address
 	cmp	bl,VESA_SET_START_ADDRESS_RETRACE
 	je	check_vretrace_status
+	cmp	bl,VESA_GET_START_ADDRESS_STATUS
+	jne	check_linear_start_address
+	popa
+	xor	cx,cx
+	jmp	exit_start_address
+check_linear_start_address:
+	cmp	bl,VESA_SET_START_ADDRESS_LINEAR
+	je	set_linear_address
+	cmp	bl,VESA_SET_START_ADDRESS_LINEAR_RETRACE
+	jne	no_standard_vesa_func
+set_linear_address:
+
+	push	eax
+	push	edx
+	push	ecx
+	movzx	eax,cs: word ptr [byte_per_scanline]
+	xor	edx,edx
+	xchg	eax,ecx
+	div	ecx
+	cmp	eax,VESA_MAX_VERTICAL_PIXEL
+	jbe	valid_linear_vertical_pixel
+	pop	ecx
+	pop	edx
+	pop	eax
+	popa
+	mov	ax,(VESA_FAIL SHL 8h) + VESA_ID
+	iret
+valid_linear_vertical_pixel:
+	xchg	ax,dx
+	cmp	cs: byte ptr [shift_mode_size],NEWAX_PLANAR_MODE
+	jne	no_planar_align_6
+	shl	ax,VGA_ALIGN_PLANAR_MODE
+no_planar_align_6:
+	mov	cl,cs: byte ptr [shift_mode_size + 1h]
+	shr	ax,cl
+	xchg	ax,si
+	mov	di,dx
+	pop	ecx
+	pop	edx
+	pop	eax
+	mov	cs: word ptr [start_x],si
+	mov	cs: word ptr [start_y],di
+	cmp	bl,VESA_SET_START_ADDRESS_LINEAR
+	je	set_start_address
+	jmp	check_vretrace_status
+
+no_standard_vesa_func:
 	popa
 	jmp	go_int_10
 check_vretrace_status:
@@ -426,8 +473,15 @@ vesa_planar_mode_1:
 	mov	al,VGA_PAS_BIT
 	out	dx,al
 	popa
+
+	cmp	bl,VESA_SET_START_ADDRESS_LINEAR
+	je	exit_start_address
+	cmp	bl,VESA_SET_START_ADDRESS_LINEAR_RETRACE
+	je	exit_start_address
+
 	mov	cs: word ptr [start_x],cx
 	mov	cs: word ptr [start_y],dx
+exit_start_address:
 	mov	ax,VESA_ID
 	iret
 continue_int_10_5:
@@ -1011,10 +1065,10 @@ go_install:
 	jne	force_newax_install
 	call	Found_NVIDIA_Card
 	jc	exit_with_print
-	call	Detect_Supported_Nvidia
-	jc	exit_newax
 	call	Write_Nvidia_Detect
 	je	exit_newax
+	call	Detect_Supported_Nvidia
+	jc	exit_newax
 	mov	ds: word ptr [dos_message_pointer],OFFSET dos_message_04
 	call	Check_NEWAX_Install
 	cmp	ax,VESA_ID
@@ -1131,53 +1185,60 @@ no_force_vsync:
 
 	Detect_Supported_Nvidia	proc	near
 
-
+	mov	ax,4F06h
+	mov	bx,1h
+	int	10h
+	cmp	ax,4Fh
+	jne	valid_nvidia_gen
+	push	bx
 	call	Get_CRTC_Port
-	mov	al,NVIDIA_CRTC_UNLOCK_REG
+	mov	al,3Fh
 	out	dx,al
 	inc	dx
 	in	al,dx
-	xchg	ax,bx
+	xchg	ax,cx
 	dec	dx
-	mov	al,NVIDIA_CRTC_UNLOCK_REG
-	out	dx,al
-	mov	al,NVIDIA_CRTC_LOCK_VALUE
-	inc	dx
-	out	dx,al
-	dec	dx
-	mov	al,NVIDIA_EXTENDED_OFFSET
+	mov	al,3Fh
 	out	dx,al
 	inc	dx
-	in	al,dx
-	mov	ah,al
-	dec	dx
-	mov	al,NVIDIA_EXTENDED_OFFSET
-	out	dx,al
-	inc	dx
-	mov	al,ah
-	xor	al,0FFh
+	mov	al,57h
 	out	dx,al
 	dec	dx
-	mov	al,NVIDIA_EXTENDED_OFFSET
+	mov	al,3Bh
 	out	dx,al
 	inc	dx
 	in	al,dx
-	cmp	al,ah
-	jne	no_nvidia_supported
+	mov	ch,al
+	dec	dx
+	mov	al,3Bh
+	out	dx,al
+	inc	dx
+	mov	al,1h
+	out	dx,al
+	push	cx
+	mov	ax,4F06h
+	mov	bx,1h
+	int	10h
+	pop	cx	
+	call	Get_CRTC_Port
+	mov	al,3Bh
+	out	dx,al
+	inc	dx
+	mov	al,ch
+	out	dx,al
+	dec	dx
+	mov	al,3Fh
+	out	dx,al
+	xchg	ax,cx
+	inc	dx
+	out	dx,al
+	pop	cx
+	cmp	cx,bx
+	je	no_nvidia_supported
+valid_nvidia_gen:
 	clc
 	ret
 no_nvidia_supported:
-	mov	al,NVIDIA_EXTENDED_OFFSET
-	out	dx,al
-	inc	dx
-	mov	al,ah
-	out	dx,al
-	dec	dx
-	mov	al,NVIDIA_CRTC_UNLOCK_REG
-	out	dx,al
-	inc	dx
-	xchg	ax,bx
-	out	dx,al
 	mov	dx,OFFSET dos_message_39
 	mov	ah,DOS_FUNC_DISPLAY_STRING
 	int	DOS_INTERRUPT
@@ -1751,7 +1812,7 @@ dos_message_37:
 dos_message_38:
 	DB	'Vsync status: Default',0Dh,0Ah,'$'
 dos_message_39:
-	DB	'Incompatible Nvidia graphic card',0Dh,0Ah,'$'
+	DB	'NEWAX support: Incompatible Nvidia graphic card detected',0Dh,0Ah,'$'
 flag_dos_message:
 	DW	OFFSET dos_message_07,OFFSET dos_message_08
 	DW	OFFSET dos_message_09,OFFSET dos_message_10

@@ -1,4 +1,4 @@
-# NEWAX 0.11
+# NEWAX 0.12 (beta)
 
 **Nvidia kEpler/maxWell/pAscal fiX** — Advanced VESA VBE TSR for DOS
 
@@ -64,6 +64,51 @@ registers on G7x (GeForce 7) and later architectures, was **first documented pub
 by the author of this project**. The key is present in Nvidia VBIOS from the GeForce 7
 series through at least the Ampere generation. On earlier cards (RIVA TNT, GeForce 2/4/6)
 the extended CRTC registers are directly accessible without an unlock sequence.
+
+---
+
+## Changes in NEWAX 0.12
+
+### New: complete 4F07h implementation
+
+NEWAX 0.12 extends the 4F07h handler with the remaining sub-functions, completing
+the full VESA VBE specification for Display Start Address / Panning:
+
+**BL=02h — Set Display Start Address (linear, pixel granularity)**
+The caller passes a linear byte offset in ECX. NEWAX converts it to X/Y coordinates
+using the current scanline length, then programs the hardware registers directly.
+Returns immediately without waiting for retrace.
+
+**BL=82h — Set Display Start Address (linear, byte granularity)**
+Identical to BL=02h in coordinate calculation but waits for vertical retrace before
+programming the hardware registers, unless `/V` (force VSync off) is active.
+
+**BL=04h — Get Display Start Address Status**
+Returns CX=0 (flip completed). Conservative implementation consistent with the
+hardware behavior observed on Nvidia GPUs, where BL=02h/82h program the registers
+synchronously without a pending-flip mechanism.
+
+This addition fixes compatibility with applications that use the linear addressing
+mode of 4F07h, including **Quake** (confirmed working on all tested Nvidia cards
+where 4F07h was previously broken) and **VBETEST**.
+
+### Improved: hardware compatibility detection
+
+The `Detect_Supported_Nvidia` routine has been redesigned with a more reliable
+approach. The previous method (XOR FFh test on CRTC 3Bh) produced false positives
+on some pre-G80 cards (GeForce 6200, Quadro FX 540 confirmed).
+
+The new routine uses VESA function 4F06h as an oracle:
+
+1. Call 4F06h BL=01h (get current scanline length) — save result
+2. If 4F06h is not supported (AX ≠ 4Fh) → card is supported by NEWAX
+3. If 4F06h is supported: unlock CRTC, write 1h to CRTC 3Bh, call 4F06h again
+4. Restore CRTC 3Bh and lock state
+5. If the second 4F06h result differs from the first → CRTC 3Bh affected the
+   scanline length → card is supported (G80+)
+6. If results are identical → CRTC 3Bh has no effect → card is not supported
+
+This eliminates the false positives on pre-G80 hardware confirmed in 0.11.1 testing.
 
 ---
 
@@ -228,12 +273,18 @@ Complete software implementation, no BIOS delegation:
 
 ### 4F07h — Display Start Address / Panning
 
-- Computes the full **30-bit** start address
-- Uses Nvidia extended registers (34h/35h) for bits 16–29
-- Supports smooth panning in all color depths
-- Fixes inverted retrace logic (BL=80h)
-- Optional forced VSync-off via `/V` flag
-- Works reliably on all Kepler/Maxwell/Pascal GPUs
+Complete implementation of all sub-functions:
+
+- **BL=00h** — set display start address
+- **BL=01h** — get display start address
+- **BL=02h** — set display start address, linear offset, pixel granularity
+- **BL=04h** — get display start address status
+- **BL=80h** — set display start address during retrace (fixes inverted retrace logic)
+- **BL=82h** — set display start address during retrace, linear offset, byte granularity
+
+Computes the full **30-bit** start address using Nvidia extended registers (34h/35h)
+for bits 16–29. Supports smooth panning in all color depths. Optional forced
+VSync-off via `/V` flag. Works reliably on all Kepler/Maxwell/Pascal GPUs.
 
 ### Additional Fixes
 
@@ -276,8 +327,8 @@ functions are confirmed broken. Use `/F` to bypass this check when:
 
 ### /V Flag
 
-Skips the vertical retrace wait in the 4F07h BL=80h handler. Useful on systems
-where the retrace loop causes issues. Can be toggled on an already-installed TSR.
+Skips the vertical retrace wait in the 4F07h BL=80h and BL=82h handlers. Useful
+on systems where the retrace loop causes issues. Can be toggled on an already-installed TSR.
 
 ### /M Flag
 
@@ -289,22 +340,36 @@ Useful when the BIOS reports an incorrect value. Accepts values in KB from
 
 ## Compatibility
 
-Confirmed working on the following hardware (NEWAX 0.11):
+### Supported hardware (NEWAX 0.12 beta)
 
 | Card | PCI_ID | Rev | SUBSYS_ID | Notes | Submitter |
 | ---- | ------ | --- | --------- | ----- | --------- |
-| GeForce RTX 4060 Ti | 10DE:2803 | — | — | | Ockiller |
-| GeForce RTX A4000 (Ampere) | 10DE:2571 | — | — | /F required; 4F06h absent from VBIOS; /M:16384 | LSS10999 |
+| GeForce RTX 4060 Ti | 10DE:2803 | A1 | 10B0:F314 | 4F07h/4F06h broken in VBIOS | ockiller |
+| GeForce RTX A4000 (Ampere) | 10DE:24B0 | A1 | 103C:14AD | 4F07h/4F06h broken; /M:16384 | LSS10999 |
 | GeForce GTX 1050 | 10DE:1C81 | A1 | 1458:3766 | 4F07h broken in VBIOS | Marco Pistella |
 | GeForce GT 1030 | 10DE:1D01 | A1 | 1462:8C98 | 4F07h broken in VBIOS | Marco Pistella |
+| GeForce GTX 970 | 10DE:13C2 | A1 | 3842:2974 | 4F07h broken in VBIOS | RayeR |
 | GeForce GTX 970 | 10DE:13C2 | A1 | 1462:3161 | 4F07h broken in VBIOS | Falcosoft |
-| GeForce GTX 960 | — | — | — | 4F07h broken in VBIOS | Falcosoft |
-| GeForce GT 740 | 10DE:0FC8 | A1 | 10DE:0FC8 | 4F07h broken in VBIOS; /M:16384 | Marco Pistella |
+| GeForce GTX 650 | 10DE:0FC6 | A1 | 1458:3553 | 4F07h broken in VBIOS | EduBat |
+| GeForce GT 740 | 10DE:0FC8 | A1 | 10DE:0FC8 | 4F07h broken; /M:16384 | Marco Pistella |
 | GeForce GTX 550 Ti | 10DE:1244 | A1 | 0000:0000 | /M:16384 | Marco Pistella |
 | GeForce 210 | 10DE:0A65 | A2 | 1043:8490 | /M:16384 | Marco Pistella |
 | GeForce 210 | 10DE:0A65 | A2 | 1043:852D | /M:16384 | Marco Pistella |
 | GeForce 8400 GS | 10DE:0422 | A1 | 1ACC:0851 | /M:16384 | Marco Pistella |
-| GeForce 7025 (IGP) | 10DE:03D6 | A2 | 1043:83A4 | Integrated GPU; 4F06h/4F07h not supported | Marco Pistella |
+
+### Not supported hardware (Old CRTC mode — pre-G80)
+
+| Card | PCI_ID | Rev | SUBSYS_ID | Notes | Submitter |
+| ---- | ------ | --- | --------- | ----- | --------- |
+| Quadro FX 540 | 10DE:014E | A2 | 10DE:02D1 | | ockiller |
+| GeForce 7025 (IGP) | 10DE:03D6 | A2 | 1043:83A4 | Integrated GPU | Marco Pistella |
+| GeForce 6200 | 10DE:0221 | A1 | 10B0:0403 | | EduBat |
+| Quadro FX 4500 | 10DE:009D | A1 | 10DE:0322 | | DoZator |
+| GeForce4 MX 4000 | 10DE:0185 | C1 | 1043:8193 | | Marco Pistella |
+| GeForce4 MX 440 | 10DE:0171 | A3 | 1554:10E2 | | Marco Pistella |
+| GeForce2 MX/MX 400 | 10DE:0110 | B2 | 0000:0000 | | Marco Pistella |
+| Riva TNT2 Model 64/64 Pro | 10DE:002D | 15 | 0000:0000 | | Marco Pistella |
+| Vanta/Vanta LT | 10DE:002C | 15 | 10DE:0072 | | Marco Pistella |
 
 **More testing needed — please report your results in the Vogons thread.**
 
@@ -325,7 +390,7 @@ Requires `CONST.INC` and `STRUCT.INC` in the same directory.
 
 - NEWAX identifies itself via INT 10h AX=4F17h BX='MP' (MPID mechanism)
 - All extended CRTC writes use the unlock sequence (CRTC 3Fh ← 57h)
-- Hardware compatibility verified at install time via non-destructive CRTC register test
+- Hardware compatibility verified at install time via 4F06h oracle test
 - All VESA functions validated against actual VRAM size
 - All calculations use 32-bit arithmetic to prevent overflow
 - TSR resident size: ~1.3KB
@@ -338,7 +403,7 @@ Special thanks to **Falcosoft** for first documenting the Nvidia VESA VBIOS bug,
 for his [original Vogons thread](https://www.vogons.org/viewtopic.php?t=57420),
 and for extensive real-hardware testing and technical feedback throughout development.
 
-Thanks to **LSS10999**, **Ockiller**, **RayeR**, **EduBat** and **zyzzle** for
+Thanks to **LSS10999**, **ockiller**, **RayeR**, **EduBat** and **DoZator** for
 hardware testing, bug reports and technical contributions.
 
 ---
