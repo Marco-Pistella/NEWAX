@@ -1,6 +1,6 @@
 # NEWAX 0.11
 
-**Nvidia kEpler/maxWell/pAscal fiX** â€” Advanced VESA VBE TSR for DOS
+**Nvidia kEpler/maxWell/pAscal fiX** — Advanced VESA VBE TSR for DOS
 
 ## Overview
 
@@ -9,8 +9,8 @@ NEWAX is a DOS TSR (Terminate and Stay Resident) that restores **fully functiona
 Starting with version **0.10**, NEWAX is no longer a simple patch:
 it is a **complete re-implementation** of the VESA functions responsible for:
 
-- **4F06h â€” Logical Scanline Length**
-- **4F07h â€” Display Start Address / Panning**
+- **4F06h — Logical Scanline Length**
+- **4F07h — Display Start Address / Panning**
 
 NEWAX programs the VGA and Nvidia extended CRTC registers directly, bypassing the VBIOS entirely and restoring correct VESA behavior for DOS games, demos and applications.
 
@@ -20,7 +20,7 @@ NEWAX programs the VGA and Nvidia extended CRTC registers directly, bypassing th
 
 Development, discussion, technical details and community testing:
 
-ðŸ‘‰ **<https://www.vogons.org/viewtopic.php?t=57420>**
+👉 **<https://www.vogons.org/viewtopic.php?t=57420>**
 
 If you own an Nvidia GPU, **your test results are extremely valuable**.
 
@@ -50,7 +50,7 @@ Modern Nvidia VBIOS versions implement VESA functions incorrectly or not at all:
 - **4F06h** is missing or broken on many cards
 - BL=80h retrace logic is inverted, causing display flickering
 - Page count is wrong
-- VRAM boundary checks trigger INT 0 (divide by zero) on cards with â‰¥256MB VRAM
+- VRAM boundary checks trigger INT 0 (divide by zero) on cards with ≥256MB VRAM
 
 NEWAX replaces these broken functions with **fully working implementations** based on
 reverse-engineered Nvidia CRTC registers.
@@ -76,39 +76,39 @@ cards **before installation**, using a direct hardware-level test.
 
 The detection exploits a structural difference between the two families:
 
-- **Supported cards** (Kepler and later) protect their extended CRTC registers behind a
-  lock. After locking CRTC 3Fh, a write to the extended offset register (CRTC 3Bh) has
-  no effect â€” the register is hardware-protected until unlocked.
-- **Unsupported cards** (pre-Kepler without lock support) have no such protection:
-  CRTC 3Bh is freely readable and writable at all times.
+- **Supported cards** (G80 / GeForce 8 and later) protect their extended CRTC registers
+  behind a lock. After locking CRTC 3Fh, a write to the extended offset register
+  (CRTC 3Bh) has no effect — the register is hardware-protected until unlocked.
+- **Unsupported cards** (pre-G80) have no such protection: CRTC 3Bh is freely readable
+  and writable at all times.
 
 The routine locks CRTC 3Fh, then attempts a non-destructive write (`XOR FFh`) to
 CRTC 3Bh and reads back the result:
 
-- Readback **unchanged** â†’ register is protected â†’ card **supported** â†’ installation proceeds
-- Readback **changed** â†’ register is writable â†’ card **not supported** â†’ original values
+- Readback **unchanged** → register is protected → card **supported** → installation proceeds
+- Readback **changed** → register is writable → card **not supported** → original values
   restored, installation refused
 
 In `/S` diagnostic mode the test is always run and its result displayed, even on
 unsupported cards, together with the full PCI information.
 
-### New: `/V` flag â€” force VSync off
+### New: `/V` flag — force VSync off
 
 A new `/V` command-line argument toggles forced VSync-off mode. When active, the
-4F07h BL=02h handler (set start address during vertical retrace) skips the retrace
-wait loop and sets the display start address immediately. Useful on systems where the
-retrace wait causes timing problems.
+4F07h BL=80h handler skips the retrace wait loop and sets the display start address
+immediately. Useful on systems where the retrace wait causes timing problems.
 
 The VSync status is reported in `/S` output:
 - `Vsync status: Forced to off`
 - `Vsync status: Default`
 
 ### Bugfix: write to interrupt vector table in VGA mode set handler
-In the AH=00h (Set VGA Mode) INT 10h handler, a segment register error caused
-every VGA mode set to write into the interrupt vector table.
+
+In the `AH=00h` (Set VGA Mode) INT 10h handler, a segment register error caused
+every VGA mode set to write into the **interrupt vector table**.
 
 ```asm
-; ; 0.10 — BUGGY: DS still points to segment 0000h (IVT) at this point
+; 0.10 — BUGGY: DS still points to segment 0000h (IVT) at this point
 push  BIOS_INTERRUPT_SEGMENT   ; pushes 0000h
 pop   ds                       ; DS = 0000h
 cmp   ds:[BIOS_OFFSET_VGA_VIDEO_MODE], VGA_MAX_VIDEO_MODE
@@ -124,20 +124,17 @@ pop   ds                       ; DS restored after use
 ```
 
 Effect of the bug: on every VGA mode set, one byte of the interrupt vector table
-was cleared. Depending on the offset of status_flag_0_tsr, this could silently
+was cleared. Depending on the offset of `status_flag_0_tsr`, this could silently
 corrupt one of the low interrupt vectors, causing unpredictable system behavior.
 
-### Improved diagnostic messages
+### Improved: diagnostic messages in `/S` output
 
-The `/S` status output labels for the original VESA function check have been made
-more descriptive:
-
-- `Original 4F06h VESA function` â†’ **`Original Logical Scanline Length (4F06h)`**
-- `Original 4F07h VESA function` â†’ **`Original Display Start Address/Panning (4F07h)`**
+- `Original 4F06h VESA function` → **`Original Logical Scanline Length (4F06h)`**
+- `Original 4F07h VESA function` → **`Original Display Start Address/Panning (4F07h)`**
 
 ### New: VRAM clear on mode set (4F02h)
 
-NEWAX now zeroes the entire VRAM when a VESA mode is opened without the
+NEWAX now zeroes the visible VRAM when a VESA mode is opened without the
 no-clear flag (BX bit 15 = 0), replicating the behavior that a correct VBIOS
 should provide. Both banked and linear framebuffer modes are supported,
 including planar modes.
@@ -172,24 +169,24 @@ consistent with the rest of the codebase.
 | Unlock    | CRTC 3Fh | 57h   |
 | Lock      | CRTC 3Fh | 08h   |
 
-Extended CRTC registers for offset and start address are **read-only until unlocked**.
+Extended CRTC registers are **read-only until unlocked**.
 The unlock key **2469FDB9h** is first documented publicly by the author of this project.
 
-#### Start Address
+#### Start Address (30-bit)
 
 | Bits  | Register       |
 | ----- | -------------- |
-| 0â€“7   | CRTC 0Dh       |
-| 8â€“15  | CRTC 0Ch       |
-| 16â€“23 | CRTC 35h       |
-| 24â€“29 | CRTC 34h [5:0] |
+| 0–7   | CRTC 0Dh       |
+| 8–15  | CRTC 0Ch       |
+| 16–23 | CRTC 35h       |
+| 24–29 | CRTC 34h [5:0] |
 
-#### Offset Register
+#### Offset Register (16-bit)
 
 | Bits  | Register                                    |
 | ----- | ------------------------------------------- |
-| 0â€“7   | CRTC 13h                                    |
-| 8â€“15  | **CRTC 3Bh** *(first public documentation)* |
+| 0–7   | CRTC 13h                                    |
+| 8–15  | **CRTC 3Bh** *(first public documentation)* |
 
 ---
 
@@ -201,23 +198,23 @@ No lock/unlock sequence required. Extended registers are always accessible.
 
 | Bits  | Register          |
 | ----- | ----------------- |
-| 0â€“7   | CRTC 0Dh          |
-| 8â€“15  | CRTC 0Ch          |
-| 16â€“20 | CRTC 19h [4:0]    |
-| 21â€“24 | CRTC 2Dh [3:0]    |
+| 0–7   | CRTC 0Dh          |
+| 8–15  | CRTC 0Ch          |
+| 16–20 | CRTC 19h [4:0]    |
+| 21–24 | CRTC 2Dh [3:0]    |
 
 #### Offset Register
 
 | Bits  | Register       |
 | ----- | -------------- |
-| 0â€“7   | CRTC 13h       |
-| 8â€“10  | CRTC 19h [7:5] |
+| 0–7   | CRTC 13h       |
+| 8–10  | CRTC 19h [7:5] |
 
 ---
 
 ## VESA Function Implementations
 
-### 4F06h â€” Logical Scanline Length
+### 4F06h — Logical Scanline Length
 
 Complete software implementation, no BIOS delegation:
 
@@ -229,10 +226,10 @@ Complete software implementation, no BIOS delegation:
 - Minimum scanline enforced: cannot be set below the mode's horizontal resolution
 - Support for extremely large horizontal resolutions (up to 524280px at 8bpp)
 
-### 4F07h â€” Display Start Address / Panning
+### 4F07h — Display Start Address / Panning
 
 - Computes the full **30-bit** start address
-- Uses Nvidia extended registers (34h/35h) for bits 16â€“29
+- Uses Nvidia extended registers (34h/35h) for bits 16–29
 - Supports smooth panning in all color depths
 - Fixes inverted retrace logic (BL=80h)
 - Optional forced VSync-off via `/V` flag
@@ -240,12 +237,12 @@ Complete software implementation, no BIOS delegation:
 
 ### Additional Fixes
 
-- **4F05h** â€” fixes VRAM boundary checks for cards with >4MB VRAM
-- **4F01h** â€” correct page count for all memory models (planar Ã—4 correction)
-- **4F02h** â€” tracks memory model, scanline size and resolution for use by 4F06h/4F07h
-- **VBE version override** â€” toggle VESA 2.0 / 3.0 reporting (`/2`)
-- **One-page mode** â€” forces NumberOfImagePages = 0 (`/1`)
-- **Forced VRAM size** â€” override VBE TotalMemory reporting (`/M`)
+- **4F05h** — fixes VRAM boundary checks for cards with >4MB VRAM
+- **4F01h** — correct page count for all memory models (planar ×4 correction)
+- **4F02h** — tracks memory model, scanline size and resolution; clears VRAM on mode set
+- **VBE version override** — toggle VESA 2.0 / 3.0 reporting (`/2`)
+- **One-page mode** — forces NumberOfImagePages = 0 (`/1`)
+- **Forced VRAM size** — override VBE TotalMemory reporting (`/M`)
 
 ---
 
@@ -260,7 +257,7 @@ NEWAX.COM /2                 Toggle VESA 2.0 / 3.0 reporting
 NEWAX.COM /P                 Toggle VBE/PMI support
 NEWAX.COM /1                 Toggle one-page mode
 NEWAX.COM /V                 Toggle force VSync off
-NEWAX.COM /M:<value>         Force VESA memory size (in KB, 256â€“262144)
+NEWAX.COM /M:<value>         Force VESA memory size (in KB, 256–262144)
 ```
 
 Arguments `/2`, `/P`, `/1`, `/V` and `/M` can be combined with each other and used
@@ -279,14 +276,14 @@ functions are confirmed broken. Use `/F` to bypass this check when:
 
 ### /V Flag
 
-Skips the vertical retrace wait in the 4F07h BL=02h handler. Useful on systems
+Skips the vertical retrace wait in the 4F07h BL=80h handler. Useful on systems
 where the retrace loop causes issues. Can be toggled on an already-installed TSR.
 
 ### /M Flag
 
 Overrides the VRAM size reported by the VBIOS (`VbeInfoBlock.TotalMemory`).
 Useful when the BIOS reports an incorrect value. Accepts values in KB from
-256 to 262144 (256KBâ€“256MB).
+256 to 262144 (256KB–256MB).
 
 ---
 
@@ -296,17 +293,20 @@ Confirmed working on the following hardware (NEWAX 0.11):
 
 | Card | PCI_ID | Rev | SUBSYS_ID | Notes | Submitter |
 | ---- | ------ | --- | --------- | ----- | --------- |
+| GeForce RTX 4060 Ti | 10DE:2803 | — | — | | Ockiller |
+| GeForce RTX A4000 (Ampere) | 10DE:2571 | — | — | /F required; 4F06h absent from VBIOS; /M:16384 | LSS10999 |
 | GeForce GTX 1050 | 10DE:1C81 | A1 | 1458:3766 | 4F07h broken in VBIOS | Marco Pistella |
-| GeForce GT 1030  | 10DE:1D01 | A1 | 1462:8C98 | 4F07h broken in VBIOS | Marco Pistella |
-| GeForce GTX 970  | 10DE:13C2 | A1 | 1462:3161 | 4F07h broken in VBIOS | Falcosoft |
-| GeForce GT 740   | 10DE:0FC8 | A1 | 10DE:0FC8 | 4F07h broken in VBIOS; /M:16384 recommended | Marco Pistella |
-| GeForce GTX 550 Ti | 10DE:1244 | A1 | 0000:0000 | /M:16384 recommended | Marco Pistella |
-| GeForce 210      | 10DE:0A65 | A2 | 1043:8490 | /M:16384 recommended | Marco Pistella |
-| GeForce 210      | 10DE:0A65 | A2 | 1043:852D | /M:16384 recommended | Marco Pistella |
-| GeForce 8400 GS  | 10DE:0422 | A1 | 1ACC:0851 | /M:16384 recommended | Marco Pistella |
-| GeForce 7025     | 10DE:03D6 | A2 | 1043:83A4 | Integrated GPU; 4F06h and 4F07h not supported | Marco Pistella |
+| GeForce GT 1030 | 10DE:1D01 | A1 | 1462:8C98 | 4F07h broken in VBIOS | Marco Pistella |
+| GeForce GTX 970 | 10DE:13C2 | A1 | 1462:3161 | 4F07h broken in VBIOS | Falcosoft |
+| GeForce GTX 960 | — | — | — | 4F07h broken in VBIOS | Falcosoft |
+| GeForce GT 740 | 10DE:0FC8 | A1 | 10DE:0FC8 | 4F07h broken in VBIOS; /M:16384 | Marco Pistella |
+| GeForce GTX 550 Ti | 10DE:1244 | A1 | 0000:0000 | /M:16384 | Marco Pistella |
+| GeForce 210 | 10DE:0A65 | A2 | 1043:8490 | /M:16384 | Marco Pistella |
+| GeForce 210 | 10DE:0A65 | A2 | 1043:852D | /M:16384 | Marco Pistella |
+| GeForce 8400 GS | 10DE:0422 | A1 | 1ACC:0851 | /M:16384 | Marco Pistella |
+| GeForce 7025 (IGP) | 10DE:03D6 | A2 | 1043:83A4 | Integrated GPU; 4F06h/4F07h not supported | Marco Pistella |
 
-**More testing needed â€” please report your results in the Vogons thread.**
+**More testing needed — please report your results in the Vogons thread.**
 
 ---
 
@@ -324,7 +324,7 @@ Requires `CONST.INC` and `STRUCT.INC` in the same directory.
 ## Technical Notes
 
 - NEWAX identifies itself via INT 10h AX=4F17h BX='MP' (MPID mechanism)
-- All extended CRTC writes use the unlock sequence (CRTC 3Fh â† 57h)
+- All extended CRTC writes use the unlock sequence (CRTC 3Fh ← 57h)
 - Hardware compatibility verified at install time via non-destructive CRTC register test
 - All VESA functions validated against actual VRAM size
 - All calculations use 32-bit arithmetic to prevent overflow
@@ -336,12 +336,13 @@ Requires `CONST.INC` and `STRUCT.INC` in the same directory.
 
 Special thanks to **Falcosoft** for first documenting the Nvidia VESA VBIOS bug,
 for his [original Vogons thread](https://www.vogons.org/viewtopic.php?t=57420),
-and for extensive real-hardware testing and technical feedback.
+and for extensive real-hardware testing and technical feedback throughout development.
 
-Thanks to the Vogons community for continuous feedback and testing.
+Thanks to **LSS10999**, **Ockiller**, **RayeR**, **EduBat** and **zyzzle** for
+hardware testing, bug reports and technical contributions.
 
 ---
 
 ## License
 
-MIT License â€” Â© 2026 Marco Pistella
+MIT License — © 2026 Marco Pistella
